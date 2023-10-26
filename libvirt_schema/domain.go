@@ -72,12 +72,11 @@ type InterfaceTarget struct {
 	Device string `xml:"dev,attr"`
 }
 
-
-func NewDomainFromXML(xmlDesc []byte) (*Domain, error) {
-	domain := &Domain{}
-	err := xml.Unmarshal(xmlDesc, domain)
+func NewDomainFromXML(xmlDesc []byte) (Domain, error) {
+	domain := Domain{}
+	err := xml.Unmarshal(xmlDesc, &domain)
 	if err != nil {
-		return nil, err
+		return Domain{}, err
 	}
 	return domain, nil
 }

@@ -1,6 +1,8 @@
 package collector
 
 import (
+	"strconv"
+
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
@@ -22,7 +24,7 @@ func NewCPUCollector(logger log.Logger) (Collector, error) {
 			prometheus.NewDesc(
 				prometheus.BuildFQName(namespace, "domain_cpu", "seconds_total"),
 				"Seconds the vCPUs in VMs for each domain",
-				[]string{"domain_uuid"},
+				[]string{"domain_uuid", "state"},
 				nil),
 			prometheus.CounterValue,
 		},
@@ -30,7 +32,7 @@ func NewCPUCollector(logger log.Logger) (Collector, error) {
 			prometheus.NewDesc(
 				prometheus.BuildFQName(namespace, "domain_cpu", "vcpu_number"),
 				"Number of vCPUs in VMs for each domain",
-				[]string{"domain_uuid"},
+				[]string{"domain_uuid", "state"},
 				nil),
 			prometheus.GaugeValue,
 		},
@@ -60,15 +62,16 @@ func (c *cpuCollector) Update(ch chan<- prometheus.Metric, opts ...CollectorOpti
 	lvDomains := config.lvDomains
 
 	for _, lvDomain := range lvDomains {
-		_, _, _, nrVirtCPU, cpuTime, err := pLibvirt.DomainGetInfo(*lvDomain.domain)
+		// state meaning explained here: https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainState
+		state, _, _, nrVirtCPU, cpuTime, err := pLibvirt.DomainGetInfo(lvDomain.domain)
 		if err != nil {
 			level.Error(c.logger).Log("msg", "failed to get domain info", "domain", lvDomain.domain.Name, "err", err)
 			continue
 		}
 		level.Debug(c.logger).Log("msg", "get domain info", "domain", lvDomain.domain.Name, "nrVirtCPU", nrVirtCPU, "cpuTime", cpuTime)
 
-		ch <- c.secondsTotal.mustNewConstMetric(float64(cpuTime)/1e9, lvDomain.schema.UUID)
-		ch <- c.vCPUNumber.mustNewConstMetric(float64(nrVirtCPU), lvDomain.schema.UUID)
+		ch <- c.secondsTotal.mustNewConstMetric(float64(cpuTime)/1e9, lvDomain.schema.UUID, strconv.Itoa(int(state)))
+		ch <- c.vCPUNumber.mustNewConstMetric(float64(nrVirtCPU), lvDomain.schema.UUID, strconv.Itoa(int(state)))
 	}
 
 	return nil

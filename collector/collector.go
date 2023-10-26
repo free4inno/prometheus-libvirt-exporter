@@ -168,7 +168,7 @@ func (n LibvirtCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 
 		lvDomains[i] = lvDomain{
-			domain: &domain,
+			domain: domain,
 			schema: schema,
 		}
 	}
@@ -245,8 +245,8 @@ func (d *typedDesc) mustNewConstMetric(value float64, labels ...string) promethe
 }
 
 type lvDomain struct {
-	domain *libvirt.Domain
-	schema *libvirt_schema.Domain
+	domain libvirt.Domain
+	schema libvirt_schema.Domain
 }
 
 // pushMetric helps construct and convert a variety of value types into Prometheus float64 metrics.
