@@ -91,7 +91,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // (in which case it will log all the collectors enabled via command-line
 // flags).
 func (h *handler) innerHandler(filters ...string) (http.Handler, error) {
-	nc, err := collector.NewLibvirtCollector(h.pLibvirt, h.logger, filters...)
+	lc, err := collector.NewLibvirtCollector(h.pLibvirt, h.logger, filters...)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't create collector: %s", err)
 	}
@@ -101,7 +101,7 @@ func (h *handler) innerHandler(filters ...string) (http.Handler, error) {
 	if len(filters) == 0 {
 		level.Info(h.logger).Log("msg", "Enabled collectors")
 		collectors := []string{}
-		for n := range nc.Collectors {
+		for n := range lc.Collectors {
 			collectors = append(collectors, n)
 		}
 		sort.Strings(collectors)
@@ -112,7 +112,7 @@ func (h *handler) innerHandler(filters ...string) (http.Handler, error) {
 
 	r := prometheus.NewRegistry()
 	r.MustRegister(version.NewCollector("libvirt_exporter"))
-	if err := r.Register(nc); err != nil {
+	if err := r.Register(lc); err != nil {
 		return nil, fmt.Errorf("couldn't register libvirt collector: %s", err)
 	}
 	handler := promhttp.HandlerFor(
