@@ -1,6 +1,9 @@
 package collector
 
 import (
+	"sync"
+
+	libvirt "github.com/digitalocean/go-libvirt"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
@@ -115,31 +118,46 @@ func (c *interfaceCollector) Update(ch chan<- prometheus.Metric, opts ...Collect
 	pLibvirt := config.pLibvirt
 	lvDomains := config.lvDomains
 
+	wgCounter := 0
 	for _, lvDomain := range lvDomains {
-		domainUUID := lvDomain.schema.UUID
-		for _, iface := range lvDomain.schema.Devices.Interfaces {
+		wgCounter += len(lvDomain.Schema.Devices.Interfaces)
+	}
+	wg := sync.WaitGroup{}
+	wg.Add(wgCounter)
+
+	for _, lvDomain := range lvDomains {
+		domainUUID := lvDomain.Schema.UUID
+		for _, iface := range lvDomain.Schema.Devices.Interfaces {
 			if iface.Target.Device == "" {
+				level.Debug(c.logger).Log("msg", "interface has no target device", "domain", lvDomain.Domain.Name)
+				wg.Done()
 				continue
 			}
 
 			interfaceName := iface.Target.Device
 			bridgeName := iface.Source.Bridge
-			rRxBytes, rRxPackets, rRxErrs, rRxDrop, rTxBytes, rTxPackets, rTxErrs, rTxDrop, err := pLibvirt.DomainInterfaceStats(lvDomain.domain, interfaceName)
-			if err != nil {
-				level.Error(c.logger).Log("msg", "failed to get interface stats", "domain", lvDomain.domain.Name, "interface", interfaceName, "err", err)
-				continue
-			}
-			promLabels := []string{domainUUID, bridgeName, interfaceName}
-			ch <- c.receiveBytesTotal.mustNewConstMetric(float64(rRxBytes), promLabels...)
-			ch <- c.receivePacketsTotal.mustNewConstMetric(float64(rRxPackets), promLabels...)
-			ch <- c.receiveErrorsTotal.mustNewConstMetric(float64(rRxErrs), promLabels...)
-			ch <- c.receiveDropsTotal.mustNewConstMetric(float64(rRxDrop), promLabels...)
-			ch <- c.transmitBytesTotal.mustNewConstMetric(float64(rTxBytes), promLabels...)
-			ch <- c.transmitPacketsTotal.mustNewConstMetric(float64(rTxPackets), promLabels...)
-			ch <- c.transmitErrorsTotal.mustNewConstMetric(float64(rTxErrs), promLabels...)
-			ch <- c.transmitDropsTotal.mustNewConstMetric(float64(rTxDrop), promLabels...)
+			go func(domain libvirt.Domain, domainUUID, bridgeName, interfaceName string) {
+				rRxBytes, rRxPackets, rRxErrs, rRxDrop, rTxBytes, rTxPackets, rTxErrs, rTxDrop, err := pLibvirt.DomainInterfaceStats(domain, interfaceName)
+				if err != nil {
+					level.Error(c.logger).Log("msg", "failed to get interface stats", "domain", domain.Name, "interface", interfaceName, "err", err)
+					wg.Done()
+					return
+				}
+				promLabels := []string{domainUUID, bridgeName, interfaceName}
+				ch <- c.receiveBytesTotal.mustNewConstMetric(float64(rRxBytes), promLabels...)
+				ch <- c.receivePacketsTotal.mustNewConstMetric(float64(rRxPackets), promLabels...)
+				ch <- c.receiveErrorsTotal.mustNewConstMetric(float64(rRxErrs), promLabels...)
+				ch <- c.receiveDropsTotal.mustNewConstMetric(float64(rRxDrop), promLabels...)
+				ch <- c.transmitBytesTotal.mustNewConstMetric(float64(rTxBytes), promLabels...)
+				ch <- c.transmitPacketsTotal.mustNewConstMetric(float64(rTxPackets), promLabels...)
+				ch <- c.transmitErrorsTotal.mustNewConstMetric(float64(rTxErrs), promLabels...)
+				ch <- c.transmitDropsTotal.mustNewConstMetric(float64(rTxDrop), promLabels...)
+
+				wg.Done()
+			}(lvDomain.Domain, domainUUID, bridgeName, interfaceName)
 		}
 	}
+	wg.Wait()
 
 	return nil
 }

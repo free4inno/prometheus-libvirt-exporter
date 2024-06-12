@@ -133,20 +133,44 @@ func (n LibvirtCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect implements the prometheus.Collector interface.
 func (n LibvirtCollector) Collect(ch chan<- prometheus.Metric) {
-	wg := sync.WaitGroup{}
-	wg.Add(len(n.Collectors))
-
 	// manage libvirt connection
 	if n.pLibvirt == nil {
 		level.Error(n.logger).Log("msg", "libvirt not created")
 		return
 	}
-	if n.pLibvirt.Connect() != nil {
-		level.Error(n.logger).Log("msg", "libvirt not connected")
-		return
+	if !n.pLibvirt.IsConnected() {
+		level.Warn(n.logger).Log("msg", "libvirt is not connected, try to reconnect ...")
+		if n.pLibvirt.Connect() != nil {
+			level.Error(n.logger).Log("msg", "libvirt could not connect, skip this scrape")
+			return
+		}
 	}
-	defer n.pLibvirt.Disconnect()
+	level.Info(n.logger).Log("msg", "libvirt connected, start to scrape ...")
 
+	/*
+		type ConnectListAllDomainsFlags int32
+		ConnectListAllDomainsFlags as declared in libvirt/libvirt-domain.h:1892
+
+		const (
+			ConnectListDomainsActive        ConnectListAllDomainsFlags = 1
+			ConnectListDomainsInactive      ConnectListAllDomainsFlags = 2
+			ConnectListDomainsPersistent    ConnectListAllDomainsFlags = 4
+			ConnectListDomainsTransient     ConnectListAllDomainsFlags = 8
+			ConnectListDomainsRunning       ConnectListAllDomainsFlags = 16
+			ConnectListDomainsPaused        ConnectListAllDomainsFlags = 32
+			ConnectListDomainsShutoff       ConnectListAllDomainsFlags = 64
+			ConnectListDomainsOther         ConnectListAllDomainsFlags = 128
+			ConnectListDomainsManagedsave   ConnectListAllDomainsFlags = 256
+			ConnectListDomainsNoManagedsave ConnectListAllDomainsFlags = 512
+			ConnectListDomainsAutostart     ConnectListAllDomainsFlags = 1024
+			ConnectListDomainsNoAutostart   ConnectListAllDomainsFlags = 2048
+			ConnectListDomainsHasSnapshot   ConnectListAllDomainsFlags = 4096
+			ConnectListDomainsNoSnapshot    ConnectListAllDomainsFlags = 8192
+			ConnectListDomainsHasCheckpoint ConnectListAllDomainsFlags = 16384
+			ConnectListDomainsNoCheckpoint  ConnectListAllDomainsFlags = 32768
+		)
+		ConnectListAllDomainsFlags enumeration from libvirt/libvirt-domain.h:1892
+	*/
 	flags := libvirt.ConnectListDomainsActive | libvirt.ConnectListDomainsInactive
 	domains, num, err := n.pLibvirt.ConnectListAllDomains(1, flags)
 	if err != nil {
@@ -154,7 +178,7 @@ func (n LibvirtCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 	level.Debug(n.logger).Log("msg", "list domains", "num", num)
-	lvDomains := make([]lvDomain, num)
+	lvDomains := make([]libvirt_schema.LvDomain, num)
 	for i, domain := range domains {
 		xmlDesc, err := n.pLibvirt.DomainGetXMLDesc(domain, 0)
 		if err != nil {
@@ -167,12 +191,14 @@ func (n LibvirtCollector) Collect(ch chan<- prometheus.Metric) {
 			return
 		}
 
-		lvDomains[i] = lvDomain{
-			domain: domain,
-			schema: schema,
+		lvDomains[i] = libvirt_schema.LvDomain{
+			Domain: domain,
+			Schema: schema,
 		}
 	}
 
+	wg := sync.WaitGroup{}
+	wg.Add(len(n.Collectors))
 	for name, c := range n.Collectors {
 		go func(name string, c Collector) {
 			execute(name, c, ch, n.pLibvirt, lvDomains, n.logger)
@@ -180,9 +206,10 @@ func (n LibvirtCollector) Collect(ch chan<- prometheus.Metric) {
 		}(name, c)
 	}
 	wg.Wait()
+	level.Info(n.logger).Log("msg", "scrape finished")
 }
 
-func execute(name string, c Collector, ch chan<- prometheus.Metric, pLibvirt *libvirt.Libvirt, lvDomains []lvDomain, logger log.Logger) {
+func execute(name string, c Collector, ch chan<- prometheus.Metric, pLibvirt *libvirt.Libvirt, lvDomains []libvirt_schema.LvDomain, logger log.Logger) {
 	begin := time.Now()
 
 	// prepare data for collector and Update data
@@ -218,7 +245,7 @@ type Collector interface {
 // Function Options/Functional Arguments
 type CollectorConfig struct {
 	pLibvirt  *libvirt.Libvirt
-	lvDomains []lvDomain
+	lvDomains []libvirt_schema.LvDomain
 }
 
 type CollectorOption func(*CollectorConfig)
@@ -229,7 +256,7 @@ func WithLibvirt(lv *libvirt.Libvirt) CollectorOption {
 	}
 }
 
-func WithDomains(lvDomains []lvDomain) CollectorOption {
+func WithDomains(lvDomains []libvirt_schema.LvDomain) CollectorOption {
 	return func(c *CollectorConfig) {
 		c.lvDomains = lvDomains
 	}
@@ -242,11 +269,6 @@ type typedDesc struct {
 
 func (d *typedDesc) mustNewConstMetric(value float64, labels ...string) prometheus.Metric {
 	return prometheus.MustNewConstMetric(d.desc, d.valueType, value, labels...)
-}
-
-type lvDomain struct {
-	domain libvirt.Domain
-	schema libvirt_schema.Domain
 }
 
 // pushMetric helps construct and convert a variety of value types into Prometheus float64 metrics.

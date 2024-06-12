@@ -1,6 +1,15 @@
 package libvirt_schema
 
-import "encoding/xml"
+import (
+	"encoding/xml"
+
+	"github.com/digitalocean/go-libvirt"
+)
+
+type LvDomain struct {
+	Domain libvirt.Domain
+	Schema Domain
+}
 
 type Domain struct {
 	Devices  Devices  `xml:"devices"`

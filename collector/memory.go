@@ -1,6 +1,8 @@
 package collector
 
 import (
+	"sync"
+
 	libvirt "github.com/digitalocean/go-libvirt"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -162,46 +164,55 @@ func (c *memoryCollector) Update(ch chan<- prometheus.Metric, opts ...CollectorO
 	pLibvirt := config.pLibvirt
 	lvDomains := config.lvDomains
 
-	for _, lvDomain := range lvDomains {
-		stats, err := pLibvirt.DomainMemoryStats(lvDomain.domain, uint32(libvirt.DomainMemoryStatNr), 0)
-		if err != nil {
-			level.Error(c.logger).Log("msg", "failed to get memory stats", "domain", lvDomain.domain.Name, "err", err)
-			continue
-		}
+	wg := sync.WaitGroup{}
+	wg.Add(len(lvDomains))
 
-		for _, stat := range stats {
-			tag := libvirt.DomainMemoryStatTags(stat.Tag)
-			switch tag {
-			case libvirt.DomainMemoryStatSwapIn:
-				ch <- c.swapInBytes.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			case libvirt.DomainMemoryStatSwapOut:
-				ch <- c.swapOutBytes.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			case libvirt.DomainMemoryStatMajorFault:
-				ch <- c.majorPageFaults.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			case libvirt.DomainMemoryStatMinorFault:
-				ch <- c.minorPageFaults.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			case libvirt.DomainMemoryStatUnused:
-				ch <- c.unusedBytes.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			case libvirt.DomainMemoryStatAvailable:
-				ch <- c.availableBytes.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			case libvirt.DomainMemoryStatActualBalloon:
-				ch <- c.actualBallonBytes.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			case libvirt.DomainMemoryStatRss:
-				ch <- c.rssBytes.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			case libvirt.DomainMemoryStatUsable:
-				ch <- c.usableBytes.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			case libvirt.DomainMemoryStatDiskCaches:
-				ch <- c.diskCacheBytes.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			case libvirt.DomainMemoryStatLastUpdate:
-				ch <- c.lastUpdateTimestamp.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			case libvirt.DomainMemoryStatHugetlbPgalloc:
-				ch <- c.hugetlbPagesAlloc.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			case libvirt.DomainMemoryStatHugetlbPgfail:
-				ch <- c.hugetlbPageFaults.mustNewConstMetric(float64(stat.Val), lvDomain.schema.UUID)
-			default:
-				level.Error(c.logger).Log("msg", "unknown memory stat", "domain", lvDomain.domain.Name, "tag", stat.Tag)
+	for _, lvDomain := range lvDomains {
+		domainUUID := lvDomain.Schema.UUID
+		go func(domain libvirt.Domain, domainUUID string) {
+			stats, err := pLibvirt.DomainMemoryStats(domain, uint32(libvirt.DomainMemoryStatNr), 0)
+			if err != nil {
+				level.Error(c.logger).Log("msg", "failed to get memory stats", "domain", domain.Name, "err", err)
+				wg.Done()
+				return
 			}
-		}
+
+			for _, stat := range stats {
+				tag := libvirt.DomainMemoryStatTags(stat.Tag)
+				switch tag {
+				case libvirt.DomainMemoryStatSwapIn:
+					ch <- c.swapInBytes.mustNewConstMetric(float64(stat.Val), domainUUID)
+				case libvirt.DomainMemoryStatSwapOut:
+					ch <- c.swapOutBytes.mustNewConstMetric(float64(stat.Val), domainUUID)
+				case libvirt.DomainMemoryStatMajorFault:
+					ch <- c.majorPageFaults.mustNewConstMetric(float64(stat.Val), domainUUID)
+				case libvirt.DomainMemoryStatMinorFault:
+					ch <- c.minorPageFaults.mustNewConstMetric(float64(stat.Val), domainUUID)
+				case libvirt.DomainMemoryStatUnused:
+					ch <- c.unusedBytes.mustNewConstMetric(float64(stat.Val), domainUUID)
+				case libvirt.DomainMemoryStatAvailable:
+					ch <- c.availableBytes.mustNewConstMetric(float64(stat.Val), domainUUID)
+				case libvirt.DomainMemoryStatActualBalloon:
+					ch <- c.actualBallonBytes.mustNewConstMetric(float64(stat.Val), domainUUID)
+				case libvirt.DomainMemoryStatRss:
+					ch <- c.rssBytes.mustNewConstMetric(float64(stat.Val), domainUUID)
+				case libvirt.DomainMemoryStatUsable:
+					ch <- c.usableBytes.mustNewConstMetric(float64(stat.Val), domainUUID)
+				case libvirt.DomainMemoryStatDiskCaches:
+					ch <- c.diskCacheBytes.mustNewConstMetric(float64(stat.Val), domainUUID)
+				case libvirt.DomainMemoryStatLastUpdate:
+					ch <- c.lastUpdateTimestamp.mustNewConstMetric(float64(stat.Val), domainUUID)
+				case libvirt.DomainMemoryStatHugetlbPgalloc:
+					ch <- c.hugetlbPagesAlloc.mustNewConstMetric(float64(stat.Val), domainUUID)
+				case libvirt.DomainMemoryStatHugetlbPgfail:
+					ch <- c.hugetlbPageFaults.mustNewConstMetric(float64(stat.Val), domainUUID)
+				default:
+					level.Error(c.logger).Log("msg", "unknown memory stat", "domain", domain.Name, "tag", stat.Tag)
+				}
+			}
+			wg.Done()
+		}(lvDomain.Domain, domainUUID)
 	}
+	wg.Wait()
 	return nil
 }

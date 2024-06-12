@@ -2,7 +2,9 @@ package collector
 
 import (
 	"strconv"
+	"sync"
 
+	libvirt "github.com/digitalocean/go-libvirt"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/prometheus/client_golang/prometheus"
@@ -61,18 +63,27 @@ func (c *cpuCollector) Update(ch chan<- prometheus.Metric, opts ...CollectorOpti
 	pLibvirt := config.pLibvirt
 	lvDomains := config.lvDomains
 
+	wg := sync.WaitGroup{}
+	wg.Add(len(lvDomains))
 	for _, lvDomain := range lvDomains {
-		// state meaning explained here: https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainState
-		state, _, _, nrVirtCPU, cpuTime, err := pLibvirt.DomainGetInfo(lvDomain.domain)
-		if err != nil {
-			level.Error(c.logger).Log("msg", "failed to get domain info", "domain", lvDomain.domain.Name, "err", err)
-			continue
-		}
-		level.Debug(c.logger).Log("msg", "get domain info", "domain", lvDomain.domain.Name, "nrVirtCPU", nrVirtCPU, "cpuTime", cpuTime)
+		domainUUID := lvDomain.Schema.UUID
+		go func(domain libvirt.Domain, domainUUID string) {
+			// state meaning explained here: https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainState
+			state, _, _, nrVirtCPU, cpuTime, err := pLibvirt.DomainGetInfo(domain)
+			if err != nil {
+				level.Error(c.logger).Log("msg", "failed to get domain info", "domain", domain.Name, "err", err)
+				wg.Done()
+				return
+			}
+			level.Debug(c.logger).Log("msg", "get domain info", "domain", domain.Name, "nrVirtCPU", nrVirtCPU, "cpuTime", cpuTime)
 
-		ch <- c.secondsTotal.mustNewConstMetric(float64(cpuTime)/1e9, lvDomain.schema.UUID, strconv.Itoa(int(state)))
-		ch <- c.vCPUNumber.mustNewConstMetric(float64(nrVirtCPU), lvDomain.schema.UUID, strconv.Itoa(int(state)))
+			ch <- c.secondsTotal.mustNewConstMetric(float64(cpuTime)/1e9, domainUUID, strconv.Itoa(int(state)))
+			ch <- c.vCPUNumber.mustNewConstMetric(float64(nrVirtCPU), domainUUID, strconv.Itoa(int(state)))
+
+			wg.Done()
+		}(lvDomain.Domain, domainUUID)
 	}
+	wg.Wait()
 
 	return nil
 }
