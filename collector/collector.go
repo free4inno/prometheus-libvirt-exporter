@@ -171,7 +171,7 @@ func (n LibvirtCollector) Collect(ch chan<- prometheus.Metric) {
 		)
 		ConnectListAllDomainsFlags enumeration from libvirt/libvirt-domain.h:1892
 	*/
-	flags := libvirt.ConnectListDomainsActive | libvirt.ConnectListDomainsInactive
+	flags := libvirt.ConnectListDomainsActive
 	domains, num, err := n.pLibvirt.ConnectListAllDomains(1, flags)
 	if err != nil {
 		level.Error(n.logger).Log("msg", "failed to list domains", "err", err)
