@@ -1,33 +1,53 @@
-# FROM alpine:3.17
+# Copyright 2020 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-# COPY ./.build/libvirt-exporter /bin/libvirt-exporter
+# [START cloudrun_helloworld_dockerfile]
+# [START run_helloworld_dockerfile]
 
-# EXPOSE 9177
+# Use the offical golang image to create a binary.
+# This is based on Debian and sets the GOPATH to /go.
+# https://hub.docker.com/_/golang
+FROM golang:1.22-bookworm as builder
 
-# RUN apk add --no-cache bash
+# Create and change to the app directory.
+WORKDIR /app
 
-# ENTRYPOINT ["/bin/libvirt-exporter"]
+# Retrieve application dependencies.
+# This allows the container build to reuse cached dependencies.
+# Expecting to copy go.mod and if present go.sum.
+COPY go.* ./
+RUN go mod download
 
-# Use a lightweight base image
-FROM alpine:3.14
+# Copy local code to the container image.
+COPY . ./
 
-WORKDIR /root/
+# Build the binary.
+RUN go build -v -o executable
 
-# Copy the pre-built binary from your host into the container
-COPY .build/libvirt-exporter .
+# Use the official Debian slim image for a lean production container.
+# https://hub.docker.com/_/debian
+# https://docs.docker.com/develop/develop-images/multistage-build/#use-multi-stage-builds
+FROM debian:bookworm-slim
+RUN set -x && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
-# Ensure the binary is executable
-RUN chmod +x libvirt-exporter
+# Copy the binary to the production image from the builder stage.
+COPY --from=builder /app/executable /app/executable
 
-# When mounting the volume, the socket at /var/run/libvirt/libvirt-sock on the host 
-# will be available at the same path in the container. 
-# Ensure your app has permissions to access the socket.
+# Run the web service on container startup.
+ENTRYPOINT ["/app/executable"]
 
-EXPOSE 9177
-
-USER root
-
-# Command to run the binary
-ENTRYPOINT ["./libvirt-exporter"]
-
-# docker buildx build --platform linux/amd64 --tag registry.cn-beijing.aliyuncs.com/hufu-dev/libvirt-exporter:dev-latest --push .
+# [END run_helloworld_dockerfile]
+# [END cloudrun_helloworld_dockerfile]
