@@ -51,3 +51,5 @@ ENTRYPOINT ["/app/executable"]
 
 # [END run_helloworld_dockerfile]
 # [END cloudrun_helloworld_dockerfile]
+
+# docker buildx build --platform linux/amd64 --tag registry.cn-beijing.aliyuncs.com/hufu-dev/libvirt-exporter:dev-latest --push .

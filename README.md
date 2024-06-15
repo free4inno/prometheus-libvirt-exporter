@@ -41,5 +41,7 @@ The metrics provided by the Prometheus libvirt exporter consist of four types: C
 | libvirt_domain_block_read_requests_total         | Total number of requests read       | DomainBlockStats     |
 | libvirt_domain_block_write_bytes_total           | Total number of bytes written       | DomainBlockStats     |
 | libvirt_domain_block_write_requests_total        | Total number of requests written    | DomainBlockStats     |
-
+| libvirt_domain_block_capacity_bytes              | Total number of capacity bytes      | DomainGetBlockInfo   |
+| libvirt_domain_block_allocation_bytes            | Total number of allocation bytes    | DomainGetBlockInfo   |
+| libvirt_domain_block_physical_bytes              | Total number of physical bytes      | DomainGetBlockInfo   |
 

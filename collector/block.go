@@ -10,11 +10,14 @@ import (
 )
 
 type blockCollector struct {
-	readBytes     typedDesc
-	readRequests  typedDesc
-	writeBytes    typedDesc
-	writeRequests typedDesc
-	logger        log.Logger
+	readBytes       typedDesc
+	readRequests    typedDesc
+	writeBytes      typedDesc
+	writeRequests   typedDesc
+	blockCapacity   typedDesc
+	blockAllocation typedDesc
+	blockPhysical   typedDesc
+	logger          log.Logger
 }
 
 const blockSubsystemName = "domain_block"
@@ -56,6 +59,30 @@ func NewBlockCollector(logger log.Logger) (Collector, error) {
 				[]string{"domain_uuid", "source_file", "target_device"},
 				nil),
 			valueType: prometheus.CounterValue,
+		},
+		blockCapacity: typedDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, blockSubsystemName, "capacity_bytes"),
+				"Capacity of a block device in bytes",
+				[]string{"domain_uuid", "source_file", "target_device"},
+				nil),
+			valueType: prometheus.GaugeValue,
+		},
+		blockAllocation: typedDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, blockSubsystemName, "allocation_bytes"),
+				"Allocation of a block device in bytes",
+				[]string{"domain_uuid", "source_file", "target_device"},
+				nil),
+			valueType: prometheus.GaugeValue,
+		},
+		blockPhysical: typedDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, blockSubsystemName, "physical_bytes"),
+				"Physical size of a block device in bytes",
+				[]string{"domain_uuid", "source_file", "target_device"},
+				nil),
+			valueType: prometheus.GaugeValue,
 		},
 
 		logger: logger,
@@ -113,6 +140,17 @@ func (c *blockCollector) Update(ch chan<- prometheus.Metric, opts ...CollectorOp
 				ch <- c.readRequests.mustNewConstMetric(float64(rRdReq), domainUUID, sourceFile, targetDevice)
 				ch <- c.writeBytes.mustNewConstMetric(float64(rWrBytes), domainUUID, sourceFile, targetDevice)
 				ch <- c.writeRequests.mustNewConstMetric(float64(rWrReq), domainUUID, sourceFile, targetDevice)
+
+				var blockInfoFlags uint32 = 0
+				rAllocation, rCapacity, rPhysical, err := pLibvirt.DomainGetBlockInfo(domain, sourceFile, blockInfoFlags)
+				if err == nil {
+					level.Debug(c.logger).Log("msg", "get block info", "domain", domain.Name, "rAllocation", rAllocation, "rCapacity", rCapacity, "rPhysical", rPhysical)
+					ch <- c.blockCapacity.mustNewConstMetric(float64(rCapacity), domainUUID, sourceFile, targetDevice)
+					ch <- c.blockAllocation.mustNewConstMetric(float64(rAllocation), domainUUID, sourceFile, targetDevice)
+					ch <- c.blockPhysical.mustNewConstMetric(float64(rPhysical), domainUUID, sourceFile, targetDevice)
+				} else {
+					level.Error(c.logger).Log("msg", "failed to get block info", "domain", domain.Name, "err", err)
+				}
 
 				// Task finished, decrease the wait group counter
 				wg.Done()
